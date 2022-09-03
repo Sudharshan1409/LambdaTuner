@@ -13,13 +13,13 @@ module.exports.handler = async(event, context) => {
     const getAllLambdaParams = {
         TableName : process.env.DETAILS_TABLE,
     }
-    const response = dynamodb.scan(getAllLambdaParams).promise();
+    const response = await dynamodb.scan(getAllLambdaParams).promise();
     console.log('getAllLambdaParams:', JSON.stringify(response));
 
     return {
         statusCode: 200,
         body: JSON.stringify({
-            data: response,
+            data: response.Items,
         })
     };
 };

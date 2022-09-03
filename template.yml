@@ -71,12 +71,89 @@ Globals:
         visualizationURL: !Ref visualizationURL
 
 Resources:
+  TunerEventsBucket:
+    Type: AWS::S3::Bucket
+
+  TunerEventsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TunerEventsBucket
+      PolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Action: s3:GetBucketAcl
+            Effect: Allow
+            Principal:
+              "Service": "cloudtrail.amazonaws.com"
+            Resource: !GetAtt TunerEventsBucket.Arn
+
+          - Action: s3:PutObject
+            Effect: Allow
+            Principal:
+              "Service": "cloudtrail.amazonaws.com"
+            Resource:
+              - !Join [ "/", [ !GetAtt TunerEventsBucket.Arn, "*" ] ]
+            Condition:
+              StringEquals:
+                "s3:x-amz-acl": "bucket-owner-full-control"
+    DependsOn: TunerEventsBucket
+  
+  TunerCloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Properties:
+      IsLogging: true
+      IncludeGlobalServiceEvents: true
+      S3BucketName: !Ref TunerEventsBucket
+      IsMultiRegionTrail: true
+      EventSelectors:
+        - DataResources:
+            - Type: AWS::Lambda::Function
+              Values:
+                - arn:aws:lambda
+          IncludeManagementEvents: true
+          ReadWriteType: All
+    DependsOn: TunerEventsBucketPolicy
+
+  TunerEventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.lambda
+        "detail-type":
+          - AWS API Call via CloudTrail
+        detail:
+          "eventSource":
+            - lambda.amazonaws.com
+          "eventName": [ { "prefix": "UpdateFunctionCode" } ]
+          # "responseElements":
+          #   functionName:
+          #     - nOps-hello-2
+      Targets:
+        - Arn: !GetAtt DemoFunction.Arn
+          Id: "InvokeTuner"
+    DependsOn: TunerCloudTrail
+
+  PermissionForEventsToInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref DemoFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt TunerEventBridgeRule.Arn
+
+  DemoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/demoFunction
+      Handler: index.handler
+      Runtime: nodejs14.x
 
   GetAllLambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
-      Handler: multiply.handler
+      CodeUri: lambda/getAllLambdaFunction
+      Handler: index.handler
       Runtime: nodejs14.x
       Environment:
         Variables:
@@ -109,6 +186,43 @@ Resources:
              RestApiId:
                Ref: TunerAPI
 
+  GetLambdaExecutionDetails:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/getLambdaExecutionDetails
+      Handler: index.handler
+      Runtime: nodejs14.x
+      Environment:
+        Variables:
+          HISTORY_TABLE: !Ref ExecutionHistoryTable
+          DETAILS_TABLE: !Ref ExecutionDetailsTable
+      Policies:
+        - AWSLambdaBasicExecutionRole # only logs
+        - Version: '2012-10-17' # allow Lambda actions
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:BatchWriteItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+              Resource: 
+                - !GetAtt ExecutionHistoryTable.Arn
+                - !GetAtt ExecutionDetailsTable.Arn
+
+      Events:
+         GetLambdaExecutionDetails:
+           Type: Api
+           Properties:
+             Path: /getLambdaExecutionDetails
+             Method: GET
+             RestApiId:
+               Ref: TunerAPI
+
   TunerAPI:
      Type: AWS::Serverless::Api
      Properties:
@@ -129,7 +243,7 @@ Resources:
   initializer:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri: lambda/tuner
       Handler: initializer.handler
       Layers:
         - !Ref SDKlayer
@@ -150,7 +264,7 @@ Resources:
   executor:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri: lambda/tuner
       Handler: executor.handler
       Layers:
         - !Ref SDKlayer
@@ -187,7 +301,7 @@ Resources:
   cleaner:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri: lambda/tuner
       Handler: cleaner.handler
       Layers:
         - !Ref SDKlayer
@@ -205,7 +319,7 @@ Resources:
   analyzer:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri: lambda/tuner
       Handler: analyzer.handler
       Timeout: 10
       Policies:
@@ -240,8 +354,8 @@ Resources:
   Finisher:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
-      Handler: finisher.handler
+      CodeUri: lambda/finisher
+      Handler: index.handler
       Environment:
         Variables:
           HISTORY_TABLE: !Ref ExecutionHistoryTable
@@ -263,11 +377,15 @@ Resources:
               Resource: 
                 - !GetAtt ExecutionHistoryTable.Arn
                 - !GetAtt ExecutionDetailsTable.Arn
+            - Effect: Allow
+              Action:
+                - lambda:GetFunction
+              Resource: '*'
 
   optimizer:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri: lambda/tuner
       Environment:
         Variables:
           FINISHER_FUNCTION_NAME: !GetAtt Finisher.Arn
@@ -404,8 +522,8 @@ Resources:
   Starter:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
-      Handler: starter.handler
+      CodeUri: lambda/starter
+      Handler: index.handler
       Environment:
         Variables:
           TUNER_ARN: !GetAtt powerTuningStateMachine.Arn
