@@ -73,7 +73,12 @@ Globals:
 Resources:
   TunerEventsBucket:
     Type: AWS::S3::Bucket
-
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteObjects
+            Status: Enabled
+            ExpirationInDays: 1
   TunerEventsBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -130,29 +135,22 @@ Resources:
           #   functionName:
           #     - nOps-hello-2
       Targets:
-        - Arn: !GetAtt DemoFunction.Arn
+        - Arn: !GetAtt Starter.Arn
           Id: "InvokeTuner"
     DependsOn: TunerCloudTrail
 
   PermissionForEventsToInvokeLambda: 
     Type: AWS::Lambda::Permission
     Properties: 
-      FunctionName: !Ref DemoFunction
+      FunctionName: !Ref Starter
       Action: "lambda:InvokeFunction"
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt TunerEventBridgeRule.Arn
 
-  DemoFunction:
+  GetRegisteredLambdas:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda/demoFunction
-      Handler: index.handler
-      Runtime: nodejs14.x
-
-  GetAllLambdaFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: lambda/getAllLambdaFunction
+      CodeUri: lambda/getRegisteredLambdas
       Handler: index.handler
       Runtime: nodejs14.x
       Environment:
@@ -176,13 +174,70 @@ Resources:
               Resource: 
                 - !GetAtt ExecutionHistoryTable.Arn
                 - !GetAtt ExecutionDetailsTable.Arn
-
       Events:
-         GetAllLambdaFunctions:
+         GetRegisteredLambdasEvent:
            Type: Api
            Properties:
-             Path: /getLambdas
+             Path: /getRegisteredLambdas
              Method: GET
+             RestApiId:
+               Ref: TunerAPI
+  
+  ListAllLambdas:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/listAllLambdas
+      Handler: index.handler
+      Runtime: nodejs14.x
+      Policies:
+        - AWSLambdaBasicExecutionRole # Only logs
+        - Version: '2012-10-17' # allow Lambda actions
+          Statement:
+            - Effect: Allow
+              Action:
+                - lambda:ListFunctions
+              Resource: '*'
+      Events:
+         ListAllLambdaFunctions:
+           Type: Api
+           Properties:
+             Path: /listAllLambdas
+             Method: GET
+             RestApiId:
+               Ref: TunerAPI
+
+  RegisterLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/registerLambda
+      Handler: index.handler
+      Runtime: nodejs14.x
+      Environment:
+        Variables:
+          DETAILS_TABLE: !Ref ExecutionDetailsTable
+          EVENT_BRIDGE_RULE: !Ref TunerEventBridgeRule
+      Policies:
+        - AWSLambdaBasicExecutionRole # only logs
+        - Version: '2012-10-17' # allow Lambda actions
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:BatchWriteItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+              Resource: 
+                - !GetAtt ExecutionDetailsTable.Arn
+      Events:
+         RegisterLambda:
+           Type: Api
+           Properties:
+             Path: /registerLambda
+             Method: POST
              RestApiId:
                Ref: TunerAPI
 
