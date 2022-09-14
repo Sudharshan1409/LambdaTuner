@@ -464,6 +464,38 @@ Resources:
                 - lambda:InvokeFunction
                 - lambda:InvokeAsync
               Resource: !GetAtt Finisher.Arn
+  
+  Starter:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/starter
+      Handler: index.handler
+      Environment:
+        Variables:
+          TUNER_ARN: !GetAtt powerTuningStateMachine.Arn
+          HISTORY_TABLE: !Ref ExecutionHistoryTable
+          DETAILS_TABLE: !Ref ExecutionDetailsTable 
+      Policies:
+        - AWSLambdaBasicExecutionRole # Only logs
+        - Version: '2012-10-17' # allow Lambda actions
+          Statement:
+            - Effect: Allow
+              Action:
+                - states:*
+              Resource: !Ref powerTuningStateMachine
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchGetItem
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:BatchWriteItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+              Resource: 
+                - !GetAtt ExecutionHistoryTable.Arn
+                - !GetAtt ExecutionDetailsTable.Arn 
 
   statemachineRole:
     Type: AWS::IAM::Role
@@ -572,23 +604,4 @@ Resources:
             analyzerArn: !GetAtt analyzer.Arn
             optimizerArn: !GetAtt optimizer.Arn
             totalExecutionTimeout: !Ref totalExecutionTimeout
-
-    
-  Starter:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: lambda/starter
-      Handler: index.handler
-      Environment:
-        Variables:
-          TUNER_ARN: !GetAtt powerTuningStateMachine.Arn
-      Policies:
-        - AWSLambdaBasicExecutionRole # Only logs
-        - Version: '2012-10-17' # allow Lambda actions
-          Statement:
-            - Effect: Allow
-              Action:
-                - states:*
-              Resource: !Ref powerTuningStateMachine
-
 

@@ -9,7 +9,7 @@ module.exports.handler = async (event, context) => {
   const updateItemParams = {
     TableName: process.env.DETAILS_TABLE,
     Key: {
-      Arn: event_body.FunctionArn,
+      Arn: event_body.FunctionArn.split(":$")[0],
     },
     UpdateExpression:
       "set functionName = :functionName, functionEvent = :functionEvent, autoUpdateFunctionConfig = :autoUpdateFunctionConfig, strategy = :strategy",

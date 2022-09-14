@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 /**
  * Initialize versions & aliases so we can execute everything in parallel.
@@ -24,37 +24,53 @@
 //     ],
 // }
 const aws = require("aws-sdk");
-module.exports.handler = async(event, context) => {
-
-    console.log('event:', JSON.stringify(event));
-    const event_body = JSON.parse(event.body)
-    console.log('event body:', JSON.stringify(event_body));
-    console.log('Environment:', JSON.stringify(process.env));
-    const stepFunction = new aws.StepFunctions();
-    for(let lambdaConfig of event_body.lambdaConfig){
-        const stepFunctionInput = {
-            "lambdaARN": lambdaConfig.lambdaARN,
-            "powerValues": [128, 256, 512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216, 10240],
-            "num": 20,
-            "autoOptimize": event_body.autoUpdateLambdaConfig,
-            "payload": lambdaConfig.payload,
-            "autoUpdateLambdaConfig": event_body.autoUpdateLambdaConfig,
-            "strategy": event_body.strategy ? event_body.strategy : "cost",
-        };
-        const stepFunctionParams = {
-            stateMachineArn: process.env.TUNER_ARN,
-            input: JSON.stringify(stepFunctionInput),
-            name: `Execution-${Date.now()}`,
-        };
-        const stepFuncRes = await stepFunction
-            .startExecution(stepFunctionParams)
-            .promise();
-        console.log("stepFunctionResForGetOrg: ", JSON.stringify(stepFuncRes));
-    }
+const stepFunction = new aws.StepFunctions();
+const dynamodb = new aws.DynamoDB.DocumentClient();
+module.exports.handler = async (event, context) => {
+  console.log("event:", JSON.stringify(event));
+  console.log("Environment:", JSON.stringify(process.env));
+  const getLambdaDetailsParams = {
+    TableName: process.env.DETAILS_TABLE,
+    Key: {
+      Arn: event.detail.responseElements.functionArn,
+    },
+  };
+  const lambdaDetails = await dynamodb.get(getLambdaDetailsParams).promise();
+  console.log("lamdbaDetails", JSON.stringify(lambdaDetails));
+  if (!lambdaDetails.Item) {
+    console.log("The Lambda Function is not registered");
     return {
-        statusCode: 200,
-        body: JSON.stringify({
-            message: 'Success',
-        })
+      statusCode: 200,
+      body: JSON.stringify({
+        message: "Lambda Function is not registered",
+      }),
     };
+  }
+  const stepFunctionInput = {
+    lambdaARN: lambdaDetails.Item.Arn,
+    powerValues: [
+      128, 256, 512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216,
+      10240,
+    ],
+    num: 20,
+    autoOptimize: lambdaDetails.Item.autoUpdateFunctionConfig,
+    payload: lambdaDetails.Item.functionEvent,
+    autoUpdateLambdaConfig: lambdaDetails.Item.autoUpdateFunctionConfig,
+    strategy: lambdaDetails.Item.strategy,
+  };
+  const stepFunctionParams = {
+    stateMachineArn: process.env.TUNER_ARN,
+    input: JSON.stringify(stepFunctionInput),
+    name: `Execution-${Date.now()}`,
+  };
+  const stepFuncRes = await stepFunction
+    .startExecution(stepFunctionParams)
+    .promise();
+  console.log("stepFunctionResForGetOrg: ", JSON.stringify(stepFuncRes));
+  return {
+    statusCode: 200,
+    body: JSON.stringify({
+      message: "Success",
+    }),
+  };
 };
